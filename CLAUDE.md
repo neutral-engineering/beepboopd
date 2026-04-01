@@ -20,6 +20,7 @@ make clock           # Westminster chime at current hour
 make chords          # chord at current hour
 make scale           # scale run at current hour
 make zelda           # zelda song for current hour
+make jazz            # the lick at current hour
 make h00..h23        # chords for specific hour
 ```
 
@@ -38,11 +39,12 @@ make h00..h23        # chords for specific hour
 - `chords` — major/minor by hour (24 unique)
 - `scale` — ascending 5-note run (24 unique)
 - `zelda` — 12 Ocarina of Time songs mapped to hours
+- `jazz` — the lick in all 12 keys (hidden)
 
 ## Config
 
 - Volume: `-v <float>` or `BEEPBOOPD_VOLUME` env (default 0.9, range 0.0-1.0 for clean signal)
-- Tune: `BEEPBOOPD_TUNE` env (beep, clock, chords, scale, zelda)
+- Tune: `BEEPBOOPD_TUNE` env (beep, clock, chords, scale, zelda, jazz)
 - Weekly: `BEEPBOOPD_WEEK` env (e.g. `m:zelda;t:chords;w:clock;th:beep;f:zelda;s:scale;su:clock`)
 - WEEK overrides TUNE for specified days; unspecified days fall back to TUNE
 - Logs: structured JSON to stderr via tracing, suppress with `BEEPBOOPD_LOG=false`
