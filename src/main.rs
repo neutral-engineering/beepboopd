@@ -40,6 +40,12 @@ enum Command {
     Zelda { song: Option<ZeldaSong> },
     /// Run as a daemon: chime every hour
     Run,
+    /// Install systemd user service
+    Install,
+    /// Uninstall systemd user service
+    Uninstall,
+    /// Show systemd service status + recent logs
+    Status,
 }
 
 fn log_play(cmd: &str, tune: &dyn fmt::Display, volume: f32) {
@@ -145,6 +151,83 @@ fn tune_for_today() -> Option<Tune> {
     None
 }
 
+const SERVICE_TEMPLATE: &str = r#"[Unit]
+Description=beepboopd - Beep Boop Daemon
+
+[Service]
+Type=simple
+Restart=on-failure
+Environment="BEEPBOOPD_TUNE=zelda"
+Environment="BEEPBOOPD_VOLUME=0.8"
+Environment="BEEPBOOPD_WEEK=s:chords;su:clock"
+#Environment="BEEPBOOPD_LOG=false"
+ExecStart=EXEC_PATH run
+
+[Install]
+WantedBy=default.target
+"#;
+
+fn systemd_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").expect("HOME not set");
+    std::path::PathBuf::from(home).join(".config/systemd/user")
+}
+
+fn install_service() {
+    let exe = std::env::current_exe().expect("could not determine binary path");
+    let service = SERVICE_TEMPLATE.replace("EXEC_PATH", &exe.to_string_lossy());
+
+    let dir = systemd_dir();
+    std::fs::create_dir_all(&dir).expect("could not create systemd user dir");
+
+    let path = dir.join("beepboopd.service");
+
+    // Stop existing service if running
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "stop", "beepboopd.service"])
+        .output();
+
+    std::fs::write(&path, service).expect("could not write service file");
+    eprintln!("wrote {}", path.display());
+
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "enable", "--now", "beepboopd.service"])
+        .status();
+
+    eprintln!("beepboopd installed and started");
+    eprintln!("edit {} to configure", path.display());
+}
+
+fn uninstall_service() {
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "disable", "--now", "beepboopd.service"])
+        .status();
+
+    let path = systemd_dir().join("beepboopd.service");
+    if path.exists() {
+        std::fs::remove_file(&path).expect("could not remove service file");
+        eprintln!("removed {}", path.display());
+    }
+
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
+
+    eprintln!("beepboopd uninstalled");
+}
+
+fn show_status() {
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "status", "beepboopd.service"])
+        .status();
+    eprintln!();
+    let _ = std::process::Command::new("journalctl")
+        .args(["--user", "-u", "beepboopd.service", "-n", "10", "--no-pager"])
+        .status();
+}
+
 fn main() {
     let log_level = match std::env::var("BEEPBOOPD_LOG").ok().as_deref() {
         Some("false" | "0") => tracing::Level::ERROR,
@@ -179,6 +262,9 @@ fn main() {
     let vol = cli.volume;
 
     match cli.command.unwrap_or(Command::Beep { pattern: None }) {
+        Command::Install => install_service(),
+        Command::Uninstall => uninstall_service(),
+        Command::Status => show_status(),
         Command::Run => {
             let tune_env = std::env::var("BEEPBOOPD_TUNE").ok();
             let week_env = std::env::var("BEEPBOOPD_WEEK").ok();
@@ -255,7 +341,9 @@ fn main() {
                     log_play("scale", &hour, vol);
                     tunes::play_scale(&player, vol, hour);
                 }
-                Command::Run => unreachable!(),
+                Command::Run | Command::Install | Command::Uninstall | Command::Status => {
+                    unreachable!()
+                }
             }
 
             player.sleep_until_end();
