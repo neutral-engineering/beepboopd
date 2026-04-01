@@ -2,6 +2,9 @@
 name = "beepboopd"
 version = "0.0.1"
 edition = "2024"
+description = "the beep boop daemon"
+license = "GPL-2.0-only"
+repository = "https://github.com/neutral-engineering/beepboopd"
 
 [dependencies]
 rodio = "0.22.2"
