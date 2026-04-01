@@ -1,0 +1,14 @@
+[Unit]
+Description=beepboopd - Beep Boop Daemon
+
+[Service]
+Type=simple
+Restart=on-failure
+Environment="BEEPBOOPD_TUNE=zelda"
+Environment="BEEPBOOPD_VOLUME=0.8"
+Environment="BEEPBOOPD_WEEK=s:chords;su:clock"
+#Environment="BEEPBOOPD_LOG=false"
+ExecStart=%h/.local/bin/beepboopd run
+
+[Install]
+WantedBy=default.target

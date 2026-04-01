@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# this script was generated during the research on github.com/pgray/fpexif
+# for 2024-04-01, it is commemorated as beepboopd (in rust of course)
+
+VOLUME="8"
+
+# In CI or when ffmpeg/paplay not available, define no-op functions
+if [[ "$CI" != "" ]] || ! command -v ffmpeg &>/dev/null || ! command -v paplay &>/dev/null; then
+  function success { :; }
+  function failure { :; }
+  [[ "${BASH_SOURCE[0]}" == "${0}" ]] || return
+fi
+
+FREQ_DUR=""
+function freq_dur {
+	FREQ_DUR=""
+	tick="tick"
+	for i in $*;do
+	  if [[ "$tick" == "tick" ]]; then
+	    FREQ_DUR="$FREQ_DUR -f lavfi -i sine=frequency=$i:duration="
+	    tick="tock"
+	  else
+            FREQ_DUR="${FREQ_DUR}0.$i"
+	    tick="tick"
+	  fi
+	done
+}
+
+FILTER="[0]apad=pad_dur=0.1[a];[1]apad=pad_dur=0.1[b];[2]apad=pad_dur=0.1[c];[3]apad=pad_dur=0.1[d];[a][b][c][d][4]concat=n=5:v=0:a=1,volume=$VOLUME"
+
+function success {
+  beep_it "440 2 460 2 480 2 500 2 520 7"
+}
+
+function failure {
+  beep_it "520 2 500 2 480 2 460 2 440 7"
+}
+
+function beep_it {
+  freq_dur "$*"
+  ffmpeg $FREQ_DUR \
+    -filter_complex "$FILTER" \
+    -f wav - 2>/dev/null | paplay
+}
+
+# Call with: success or failure
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # Script run directly, not sourced
+  "${1:-success}"
+fi

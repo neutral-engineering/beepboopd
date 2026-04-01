@@ -1,0 +1,264 @@
+mod tunes;
+
+use clap::{Parser, Subcommand, ValueEnum};
+use rodio::{DeviceSinkBuilder, Player};
+use std::fmt;
+use tracing::info;
+use tunes::{BeepPattern, Tune, ZELDA_BY_HOUR, ZeldaSong};
+
+#[derive(Parser)]
+#[command(name = "beepboopd", about = "the beep boop daemon", version)]
+struct Cli {
+    /// Volume multiplier
+    #[arg(short, long, env = "BEEPBOOPD_VOLUME", default_value_t = 0.9)]
+    volume: f32,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// The OG beep (even hours: success, odd hours: failure)
+    Beep { pattern: Option<BeepPattern> },
+    /// Westminster clock chimes then bongs for the hour
+    Clock {
+        #[arg(value_parser = clap::value_parser!(u32).range(0..24))]
+        hour: Option<u32>,
+    },
+    /// Unique chord per hour: major before noon, minor after
+    Chords {
+        #[arg(value_parser = clap::value_parser!(u32).range(0..24))]
+        hour: Option<u32>,
+    },
+    /// Ascending scale run: major AM, minor PM
+    Scale {
+        #[arg(value_parser = clap::value_parser!(u32).range(0..24))]
+        hour: Option<u32>,
+    },
+    /// Ocarina of Time songs (picks by hour if no song given)
+    Zelda { song: Option<ZeldaSong> },
+    /// Run as a daemon: chime every hour
+    Run,
+}
+
+fn log_play(cmd: &str, tune: &dyn fmt::Display, volume: f32) {
+    info!(cmd = cmd, tune = %tune, volume = volume, "playing");
+}
+
+/// Resolve the current tune and play it.
+fn play_now(vol: f32) {
+    let tune = tune_for_today()
+        .or_else(|| {
+            std::env::var("BEEPBOOPD_TUNE")
+                .ok()
+                .and_then(|s| Tune::from_str(&s, true).ok())
+        })
+        .unwrap_or(Tune::Beep);
+
+    let mut h = DeviceSinkBuilder::open_default_sink().expect("Failed to open audio output");
+    h.log_on_drop(false);
+    let player = Player::connect_new(h.mixer());
+
+    match tune {
+        Tune::Beep => {
+            let pattern = if current_hour().is_multiple_of(2) {
+                BeepPattern::Success
+            } else {
+                BeepPattern::Failure
+            };
+            log_play("beep", &pattern, vol);
+            tunes::play_beep(&player, vol, &pattern);
+        }
+        Tune::Zelda => {
+            let song = ZELDA_BY_HOUR[(current_hour() % 12) as usize];
+            log_play("zelda", &song, vol);
+            tunes::play_zelda(&player, vol, &song);
+        }
+        Tune::Clock => {
+            let hour = current_hour();
+            log_play("clock", &hour, vol);
+            tunes::play_clock(&player, vol, hour);
+        }
+        Tune::Chords => {
+            let hour = current_hour();
+            log_play("chords", &hour, vol);
+            tunes::play_chords(&player, vol, hour);
+        }
+        Tune::Scale => {
+            let hour = current_hour();
+            log_play("scale", &hour, vol);
+            tunes::play_scale(&player, vol, hour);
+        }
+    }
+
+    player.sleep_until_end();
+}
+
+/// Seconds until the next hour boundary.
+fn secs_until_next_hour() -> u64 {
+    let tm = local_time();
+    let remaining = 3600 - (tm.tm_min as u64 * 60 + tm.tm_sec as u64);
+    if remaining == 0 { 3600 } else { remaining }
+}
+
+/// Get current local time.
+fn local_time() -> libc::tm {
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm = std::mem::zeroed::<libc::tm>();
+        libc::localtime_r(&t, &mut tm);
+        tm
+    }
+}
+
+fn current_hour() -> u32 {
+    local_time().tm_hour as u32
+}
+
+/// Current day of week: 0=Sunday, 1=Monday, ..., 6=Saturday.
+fn current_wday() -> u32 {
+    local_time().tm_wday as u32
+}
+
+/// Parse BEEPBOOPD_WEEK="m:zelda;t:chords;w:clock;th:beep;f:zelda;s:zelda;su:clock"
+fn tune_for_today() -> Option<Tune> {
+    let week = std::env::var("BEEPBOOPD_WEEK").ok()?;
+    let wday = current_wday();
+    let day_key = match wday {
+        0 => "su",
+        1 => "m",
+        2 => "t",
+        3 => "w",
+        4 => "th",
+        5 => "f",
+        6 => "s",
+        _ => return None,
+    };
+
+    for entry in week.split(';') {
+        let (key, val) = entry.split_once(':')?;
+        if key == day_key {
+            return Tune::from_str(val, true).ok();
+        }
+    }
+    None
+}
+
+fn main() {
+    let log_level = match std::env::var("BEEPBOOPD_LOG").ok().as_deref() {
+        Some("false" | "0") => tracing::Level::ERROR,
+        _ => tracing::Level::INFO,
+    };
+    tracing_subscriber::fmt()
+        .json()
+        .with_target(false)
+        .with_max_level(log_level)
+        .with_writer(std::io::stderr)
+        .init();
+
+    let cli_vol: Option<f32> = std::env::var("BEEPBOOPD_VOLUME")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            let _ = e.print();
+            if (e.kind() == clap::error::ErrorKind::DisplayHelp
+                || e.kind() == clap::error::ErrorKind::DisplayVersion)
+                && let Ok(mut h) = DeviceSinkBuilder::open_default_sink()
+            {
+                h.log_on_drop(false);
+                let p = Player::connect_new(h.mixer());
+                tunes::play_wee_woo(&p, cli_vol.unwrap_or(0.9) / 2.0);
+                p.sleep_until_end();
+            }
+            std::process::exit(e.exit_code());
+        }
+    };
+    let vol = cli.volume;
+
+    match cli.command.unwrap_or(Command::Beep { pattern: None }) {
+        Command::Run => {
+            let tune_env = std::env::var("BEEPBOOPD_TUNE").ok();
+            let week_env = std::env::var("BEEPBOOPD_WEEK").ok();
+            info!(
+                volume = vol,
+                tune = tune_env.as_deref().unwrap_or("beep"),
+                week = week_env.as_deref().unwrap_or(""),
+                "started"
+            );
+
+            loop {
+                let wait = secs_until_next_hour();
+                info!(next_chime_secs = wait, "sleeping");
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+                play_now(vol);
+            }
+        }
+        cmd => {
+            let mut handle =
+                DeviceSinkBuilder::open_default_sink().expect("Failed to open audio output");
+            handle.log_on_drop(false);
+            let player = Player::connect_new(handle.mixer());
+
+            // Priority: subcommand > BEEPBOOPD_WEEK (today) > BEEPBOOPD_TUNE (fallback) > beep
+            let default_tune = tune_for_today()
+                .or_else(|| {
+                    std::env::var("BEEPBOOPD_TUNE")
+                        .ok()
+                        .and_then(|s| Tune::from_str(&s, true).ok())
+                })
+                .unwrap_or(Tune::Beep);
+
+            let cmd = match cmd {
+                Command::Beep { pattern: None } => match default_tune {
+                    Tune::Beep => Command::Beep { pattern: None },
+                    Tune::Clock => Command::Clock { hour: None },
+                    Tune::Chords => Command::Chords { hour: None },
+                    Tune::Scale => Command::Scale { hour: None },
+                    Tune::Zelda => Command::Zelda { song: None },
+                },
+                other => other,
+            };
+
+            match cmd {
+                Command::Beep { pattern } => {
+                    let pattern = pattern.unwrap_or_else(|| {
+                        if current_hour().is_multiple_of(2) {
+                            BeepPattern::Success
+                        } else {
+                            BeepPattern::Failure
+                        }
+                    });
+                    log_play("beep", &pattern, vol);
+                    tunes::play_beep(&player, vol, &pattern);
+                }
+                Command::Zelda { song } => {
+                    let song =
+                        song.unwrap_or_else(|| ZELDA_BY_HOUR[(current_hour() % 12) as usize]);
+                    log_play("zelda", &song, vol);
+                    tunes::play_zelda(&player, vol, &song);
+                }
+                Command::Clock { hour } => {
+                    let hour = hour.unwrap_or_else(current_hour);
+                    log_play("clock", &hour, vol);
+                    tunes::play_clock(&player, vol, hour);
+                }
+                Command::Chords { hour } => {
+                    let hour = hour.unwrap_or_else(current_hour);
+                    log_play("chords", &hour, vol);
+                    tunes::play_chords(&player, vol, hour);
+                }
+                Command::Scale { hour } => {
+                    let hour = hour.unwrap_or_else(current_hour);
+                    log_play("scale", &hour, vol);
+                    tunes::play_scale(&player, vol, hour);
+                }
+                Command::Run => unreachable!(),
+            }
+
+            player.sleep_until_end();
+        }
+    }
+}
