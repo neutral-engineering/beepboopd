@@ -46,4 +46,5 @@ make h00..h23        # chords for specific hour
 - Weekly: `BEEPBOOPD_WEEK` env (e.g. `m:zelda;t:chords;w:clock;th:beep;f:zelda;s:scale;su:clock`)
 - WEEK overrides TUNE for specified days; unspecified days fall back to TUNE
 - Logs: structured JSON to stderr via tracing, suppress with `BEEPBOOPD_LOG=false`
-- Systemd: user service + timer in repo root, install via `make install`
+- Systemd: `beepboopd install` / `beepboopd uninstall` / `beepboopd status`
+- Also: `make install` / `make uninstall` / `make installcheck`

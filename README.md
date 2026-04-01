@@ -21,15 +21,28 @@ Runtime: PipeWire, PulseAudio, or ALSA for audio output.
 ## Install
 
 ```sh
+cargo install beepboopd
+beepboopd install
+```
+
+Or from source:
+
+```sh
 make install
 ```
 
 That's it. Your computer now chimes every hour.
 
+To check on it:
+
+```sh
+beepboopd status
+```
+
 To uninstall:
 
 ```sh
-make uninstall
+beepboopd uninstall
 ```
 
 ## Styles
@@ -63,6 +76,9 @@ Available songs: `lullaby`, `epona`, `saria`, `sun`, `time`, `storms`, `minuet`,
 ```sh
 beepboopd                    # default: beep success/failure by hour
 beepboopd run                # daemon mode: chime every hour
+beepboopd install            # install systemd user service
+beepboopd uninstall          # remove systemd user service
+beepboopd status             # show service status + recent logs
 beepboopd clock              # Westminster chime at current hour
 beepboopd chords 15          # 3 PM's chord (C# minor)
 beepboopd scale 7            # 7 AM's scale run
