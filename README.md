@@ -47,7 +47,7 @@ beepboopd uninstall
 
 ## Styles
 
-beepboopd speaks five musical languages:
+beepboopd speaks six musical languages:
 
 ### `beep`
 
@@ -71,6 +71,14 @@ A quick five-note ascending run for each hour. Major scales for hours 0-11, mino
 
 Available songs: `lullaby`, `epona`, `saria`, `sun`, `time`, `storms`, `minuet`, `bolero`, `serenade`, `nocturne`, `requiem`, `prelude`.
 
+### `jazz`
+
+The Lick. Jazz's most famous 7-note phrase (D E F G E C D) transposed to all 12 keys by hour.
+
+Swung eighths for that feel.
+
+"It don't mean a thing..."
+
 ## Usage
 
 ```sh
@@ -85,6 +93,7 @@ beepboopd scale 7            # 7 AM's scale run
 beepboopd beep success       # the OG ascending beep
 beepboopd zelda storms       # Song of Storms
 beepboopd zelda              # picks song by current hour
+beepboopd jazz               # the lick at current hour
 beepboopd -v 0.5 clock       # quieter
 ```
 
@@ -119,6 +128,7 @@ make clock    # Westminster chime at current hour
 make chords   # chord at current hour
 make scale    # scale run at current hour
 make zelda    # zelda song for current hour
+make jazz     # the lick at current hour
 make all      # play all styles in sequence
 make h00      # chords for specific hour (h00-h23)
 ```

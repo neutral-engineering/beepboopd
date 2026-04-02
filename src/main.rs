@@ -38,6 +38,11 @@ enum Command {
     },
     /// Ocarina of Time songs (picks by hour if no song given)
     Zelda { song: Option<ZeldaSong> },
+    /// The Lick — jazz's most famous phrase in all 12 keys
+    Jazz {
+        #[arg(value_parser = clap::value_parser!(u32).range(0..24))]
+        hour: Option<u32>,
+    },
     /// Run as a daemon: chime every hour
     Run,
     /// Install systemd user service
@@ -95,6 +100,11 @@ fn play_now(vol: f32) {
             let hour = current_hour();
             log_play("scale", &hour, vol);
             tunes::play_scale(&player, vol, hour);
+        }
+        Tune::Jazz => {
+            let hour = current_hour();
+            log_play("jazz", &hour, vol);
+            tunes::play_jazz(&player, vol, hour);
         }
     }
 
@@ -304,6 +314,7 @@ fn main() {
                     Tune::Chords => Command::Chords { hour: None },
                     Tune::Scale => Command::Scale { hour: None },
                     Tune::Zelda => Command::Zelda { song: None },
+                    Tune::Jazz => Command::Jazz { hour: None },
                 },
                 other => other,
             };
@@ -340,6 +351,11 @@ fn main() {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("scale", &hour, vol);
                     tunes::play_scale(&player, vol, hour);
+                }
+                Command::Jazz { hour } => {
+                    let hour = hour.unwrap_or_else(current_hour);
+                    log_play("jazz", &hour, vol);
+                    tunes::play_jazz(&player, vol, hour);
                 }
                 Command::Run | Command::Install | Command::Uninstall | Command::Status => {
                     unreachable!()

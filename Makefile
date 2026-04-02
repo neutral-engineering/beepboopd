@@ -4,18 +4,19 @@ INSTALL_DIR = $(HOME)/.local/bin
 SYSTEMD_DIR = $(HOME)/.config/systemd/user
 
 .PHONY: help build release install installcheck uninstall all check \
-	beep clock chords scale zelda
+	beep clock chords scale zelda jazz
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-all: build ## Play all styles: beep, clock, chords, scale, zelda, help
+all: build ## Play all styles: beep, clock, chords, scale, zelda, jazz, help
 	$(BINARY) beep success
 	$(BINARY) beep failure
 	$(BINARY) clock
 	$(BINARY) chords
 	$(BINARY) scale
 	$(BINARY) zelda
+	$(BINARY) jazz
 	$(BINARY) --help
 
 build: ## Build the debug binary
@@ -62,3 +63,6 @@ scale: build ## Play scale at current hour
 
 zelda: build ## Play zelda at current hour
 	$(BINARY) zelda
+
+jazz: build ## Play the lick at current hour
+	$(BINARY) jazz

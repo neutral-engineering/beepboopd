@@ -15,6 +15,7 @@ pub enum Tune {
     Chords,
     Scale,
     Zelda,
+    Jazz,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -434,6 +435,29 @@ pub fn play_zelda(player: &Player, vol: f32, song: &ZeldaSong) {
     let mut buf = Buf::new();
     for &(pitch, len) in notes {
         buf.sine_lp(note_freq(pitch as i32), len.secs(), 2000.0, vol);
+    }
+    buf.play(player);
+}
+
+/// The Lick — the most famous jazz phrase, transposed to all 12 keys.
+/// D E F G E C D (in D dorian) = intervals 0, 2, 3, 5, 2, -2, 0 from root.
+/// Swing eighths for that jazz feel.
+pub fn play_jazz(player: &Player, vol: f32, hour: u32) {
+    let root = hour_to_root(hour);
+    // (interval from root, duration in secs) — swung eighths then longer notes
+    let notes: &[(i32, f32)] = &[
+        (0, 0.23),  // D  — long swing eighth
+        (2, 0.15),  // E  — short swing eighth
+        (3, 0.23),  // F  — long
+        (5, 0.15),  // G  — short
+        (2, 0.35),  // E  — quarter
+        (-2, 0.35), // C  — quarter
+        (0, 0.65),  // D  — held
+    ];
+
+    let mut buf = Buf::new();
+    for &(interval, dur) in notes {
+        buf.sine_lp(note_freq(root + interval), dur, 2500.0, vol);
     }
     buf.play(player);
 }
