@@ -29,24 +29,17 @@ check: ## Run clippy + format check
 	cargo clippy
 	cargo fmt --check
 
-install: release ## Install binary + systemd service
-	-systemctl --user stop beepboopd.service 2>/dev/null
-	mkdir -p $(INSTALL_DIR) $(SYSTEMD_DIR)
+install: release ## Install binary + service
+	mkdir -p $(INSTALL_DIR)
 	cp $(RELEASE) $(INSTALL_DIR)/
-	cp beepboopd.service $(SYSTEMD_DIR)/
-	systemctl --user daemon-reload
-	systemctl --user enable --now beepboopd.service
+	$(INSTALL_DIR)/beepboopd install
 
 installcheck: ## Show service status + recent logs
-	systemctl --user status beepboopd.service || true
-	@echo ""
-	journalctl --user -u beepboopd.service -n 10 --no-pager
+	$(INSTALL_DIR)/beepboopd status
 
-uninstall: ## Stop and remove binary + systemd service
-	systemctl --user disable --now beepboopd.service
+uninstall: ## Stop and remove binary + service
+	$(INSTALL_DIR)/beepboopd uninstall
 	rm -f $(INSTALL_DIR)/beepboopd
-	rm -f $(SYSTEMD_DIR)/beepboopd.service
-	systemctl --user daemon-reload
 
 beep: build ## Play beep (success + failure)
 	$(BINARY) beep success
