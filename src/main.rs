@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rodio::{DeviceSinkBuilder, Player};
 use std::fmt;
 use tracing::info;
-use tunes::{BeepPattern, Tune, ZELDA_BY_HOUR, ZeldaSong};
+use tunes::{BeepPattern, CLASSICAL_BY_HOUR, ClassicalPiece, Tune, ZELDA_BY_HOUR, ZeldaSong};
 
 #[derive(Parser)]
 #[command(name = "beepboopd", about = "the beep boop daemon", version)]
@@ -47,6 +47,8 @@ enum Command {
         #[arg(value_parser = clap::value_parser!(u32).range(0..24))]
         hour: Option<u32>,
     },
+    /// Classical pieces: shrimp, satie, fur-elise, swan-lake (picks by hour if no piece given)
+    Classical { piece: Option<ClassicalPiece> },
     /// Run as a daemon: chime every hour
     Run,
     /// Install systemd user service
@@ -109,6 +111,12 @@ fn play_now(vol: f32, bpm: Option<f32>) {
             let hour = current_hour();
             log_play("jazz", &hour, vol);
             tunes::play_jazz(&player, vol, bpm, hour);
+        }
+        Tune::Classical => {
+            let hour = current_hour();
+            let piece = CLASSICAL_BY_HOUR[(hour as usize) % CLASSICAL_BY_HOUR.len()];
+            log_play("classical", &piece, vol);
+            tunes::play_classical(&player, vol, bpm, hour, &piece);
         }
     }
 
@@ -414,6 +422,7 @@ fn main() {
                     Tune::Scale => Command::Scale { hour: None },
                     Tune::Zelda => Command::Zelda { song: None },
                     Tune::Jazz => Command::Jazz { hour: None },
+                    Tune::Classical => Command::Classical { piece: None },
                 },
                 other => other,
             };
@@ -455,6 +464,12 @@ fn main() {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("jazz", &hour, vol);
                     tunes::play_jazz(&player, vol, bpm, hour);
+                }
+                Command::Classical { piece } => {
+                    let hour = current_hour();
+                    let piece = piece.unwrap_or(CLASSICAL_BY_HOUR[(hour as usize) % CLASSICAL_BY_HOUR.len()]);
+                    log_play("classical", &piece, vol);
+                    tunes::play_classical(&player, vol, bpm, hour, &piece);
                 }
                 Command::Run | Command::Install | Command::Uninstall | Command::Status => {
                     unreachable!()
