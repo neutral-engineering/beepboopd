@@ -115,7 +115,7 @@ impl ZeldaSong {
             ZeldaSong::Saria => &[
                 (F4, Eighth),
                 (A4, Eighth),
-                (B4, DotQuarter),
+                (B4, Quarter),
                 (F4, Eighth),
                 (A4, Eighth),
                 (B4, DotQuarter),
@@ -208,17 +208,13 @@ impl ZeldaSong {
 }
 
 /// Ocarina of Time songs.
-pub fn play_zelda(player: &Player, vol: f32, song: &ZeldaSong) {
+pub fn play_zelda(player: &Player, vol: f32, bpm: Option<f32>, song: &ZeldaSong) {
+    let bpm = bpm.unwrap_or(DEFAULT_BPM);
     let notes = song.notes();
 
     let mut buf = Buf::new();
     for &(pitch, len) in notes {
-        buf.sine_lp(
-            note_freq(pitch as i32),
-            beat(len.beats(), DEFAULT_BPM),
-            2000.0,
-            vol,
-        );
+        buf.sine_lp(note_freq(pitch as i32), beat(len.beats(), bpm), 2000.0, vol);
     }
     buf.play(player);
 }

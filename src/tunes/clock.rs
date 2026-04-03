@@ -4,7 +4,7 @@ use rodio::Player;
 const DEFAULT_BPM: f32 = 240.0;
 
 /// Westminster-style clock: melodic chime intro then deep bongs for the hour.
-pub fn play_clock(player: &Player, vol: f32, hour: u32) {
+pub fn play_clock(player: &Player, vol: f32, bpm: Option<f32>, hour: u32) {
     let e5 = note_freq(7);
     let c5 = note_freq(3);
     let d5 = note_freq(5);
@@ -24,13 +24,18 @@ pub fn play_clock(player: &Player, vol: f32, hour: u32) {
 
     let mut buf = Buf::new();
     for (i, &(freq, beats)) in chime.iter().enumerate() {
-        buf.sine_lp(freq, beat(beats, DEFAULT_BPM), 3000.0, vol * 0.8);
+        buf.sine_lp(
+            freq,
+            beat(beats, bpm.unwrap_or(DEFAULT_BPM)),
+            3000.0,
+            vol * 0.8,
+        );
         if i == 3 {
-            buf.silence(beat(1.6, DEFAULT_BPM));
+            buf.silence(beat(1.6, bpm.unwrap_or(DEFAULT_BPM)));
         }
     }
 
-    buf.silence(beat(2.0, DEFAULT_BPM));
+    buf.silence(beat(2.0, bpm.unwrap_or(DEFAULT_BPM)));
 
     // BONG strikes
     let bong = note_freq(-12);
@@ -39,9 +44,9 @@ pub fn play_clock(player: &Player, vol: f32, hour: u32) {
         h => h,
     };
     for i in 0..count {
-        buf.sine_lp(bong, beat(2.4, DEFAULT_BPM), 1000.0, vol);
+        buf.sine_lp(bong, beat(2.4, bpm.unwrap_or(DEFAULT_BPM)), 1000.0, vol);
         if i < count - 1 {
-            buf.silence(beat(2.0, DEFAULT_BPM));
+            buf.silence(beat(2.0, bpm.unwrap_or(DEFAULT_BPM)));
         }
     }
     buf.play(player);

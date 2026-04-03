@@ -5,7 +5,7 @@ const DEFAULT_BPM: f32 = 150.0;
 
 /// Scale style: 5-note ascending run.
 /// Hours 0-11 use major intervals, 12-23 use minor intervals.
-pub fn play_scale(player: &Player, vol: f32, hour: u32) {
+pub fn play_scale(player: &Player, vol: f32, bpm: Option<f32>, hour: u32) {
     let root = hour_to_root(hour);
     let intervals: &[i32] = if hour >= 12 {
         &[0, 2, 3, 5, 7]
@@ -18,7 +18,7 @@ pub fn play_scale(player: &Player, vol: f32, hour: u32) {
         let beats = if i == intervals.len() - 1 { 1.0 } else { 0.5 };
         buf.sine_lp(
             note_freq(root + interval),
-            beat(beats, DEFAULT_BPM),
+            beat(beats, bpm.unwrap_or(DEFAULT_BPM)),
             3000.0,
             vol,
         );

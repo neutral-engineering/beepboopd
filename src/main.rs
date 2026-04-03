@@ -13,6 +13,10 @@ struct Cli {
     #[arg(short, long, env = "BEEPBOOPD_VOLUME", default_value_t = 0.9)]
     volume: f32,
 
+    /// BPM override (uses each tune's default if not set)
+    #[arg(short, long, env = "BEEPBOOPD_BPM")]
+    bpm: Option<f32>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -58,7 +62,7 @@ fn log_play(cmd: &str, tune: &dyn fmt::Display, volume: f32) {
 }
 
 /// Resolve the current tune and play it.
-fn play_now(vol: f32) {
+fn play_now(vol: f32, bpm: Option<f32>) {
     let tune = tune_for_today()
         .or_else(|| {
             std::env::var("BEEPBOOPD_TUNE")
@@ -79,43 +83,51 @@ fn play_now(vol: f32) {
                 BeepPattern::Failure
             };
             log_play("beep", &pattern, vol);
-            tunes::play_beep(&player, vol, &pattern);
+            tunes::play_beep(&player, vol, bpm, &pattern);
         }
         Tune::Zelda => {
             let song = ZELDA_BY_HOUR[(current_hour() % 12) as usize];
             log_play("zelda", &song, vol);
-            tunes::play_zelda(&player, vol, &song);
+            tunes::play_zelda(&player, vol, bpm, &song);
         }
         Tune::Clock => {
             let hour = current_hour();
             log_play("clock", &hour, vol);
-            tunes::play_clock(&player, vol, hour);
+            tunes::play_clock(&player, vol, bpm, hour);
         }
         Tune::Chords => {
             let hour = current_hour();
             log_play("chords", &hour, vol);
-            tunes::play_chords(&player, vol, hour);
+            tunes::play_chords(&player, vol, bpm, hour);
         }
         Tune::Scale => {
             let hour = current_hour();
             log_play("scale", &hour, vol);
-            tunes::play_scale(&player, vol, hour);
+            tunes::play_scale(&player, vol, bpm, hour);
         }
         Tune::Jazz => {
             let hour = current_hour();
             log_play("jazz", &hour, vol);
-            tunes::play_jazz(&player, vol, hour);
+            tunes::play_jazz(&player, vol, bpm, hour);
         }
     }
 
     player.sleep_until_end();
 }
 
-/// Seconds until the next hour boundary.
-fn secs_until_next_hour() -> u64 {
+const WAKE_INTERVAL_SECS: u64 = 300; // 5 minutes
+
+/// Seconds until the next chime boundary for a given period in minutes.
+fn secs_until_next_chime(period_min: u64) -> u64 {
     let tm = local_time();
-    let remaining = 3600 - (tm.tm_min as u64 * 60 + tm.tm_sec as u64);
-    if remaining == 0 { 3600 } else { remaining }
+    let elapsed = tm.tm_min as u64 * 60 + tm.tm_sec as u64;
+    let period_secs = period_min * 60;
+    let remaining = period_secs - (elapsed % period_secs);
+    if remaining == 0 {
+        period_secs
+    } else {
+        remaining
+    }
 }
 
 /// Get current local time.
@@ -179,6 +191,8 @@ const ENV_KEYS: &[&str] = &[
     "BEEPBOOPD_TUNE",
     "BEEPBOOPD_VOLUME",
     "BEEPBOOPD_WEEK",
+    "BEEPBOOPD_BPM",
+    "BEEPBOOPD_PERIOD_MINUTES",
     "BEEPBOOPD_LOG",
 ];
 
@@ -340,26 +354,41 @@ fn main() {
         }
     };
     let vol = cli.volume;
+    let bpm = cli.bpm;
 
     match cli.command.unwrap_or(Command::Beep { pattern: None }) {
         Command::Install => install_service(),
         Command::Uninstall => uninstall_service(),
         Command::Status => show_status(),
         Command::Run => {
+            let period_min: u64 = std::env::var("BEEPBOOPD_PERIOD_MINUTES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(60);
             let tune_env = std::env::var("BEEPBOOPD_TUNE").ok();
             let week_env = std::env::var("BEEPBOOPD_WEEK").ok();
             info!(
                 volume = vol,
                 tune = tune_env.as_deref().unwrap_or("beep"),
                 week = week_env.as_deref().unwrap_or(""),
+                period_min = period_min,
                 "started"
             );
 
+            let mut last_chime = std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(period_min * 60))
+                .unwrap_or_else(std::time::Instant::now);
             loop {
-                let wait = secs_until_next_hour();
-                info!(next_chime_secs = wait, "sleeping");
-                std::thread::sleep(std::time::Duration::from_secs(wait));
-                play_now(vol);
+                let until_chime = secs_until_next_chime(period_min);
+                let sleep = until_chime.min(WAKE_INTERVAL_SECS);
+                std::thread::sleep(std::time::Duration::from_secs(sleep));
+
+                if secs_until_next_chime(period_min) <= 1
+                    && last_chime.elapsed().as_secs() > period_min * 30
+                {
+                    play_now(vol, bpm);
+                    last_chime = std::time::Instant::now();
+                }
             }
         }
         cmd => {
@@ -399,33 +428,33 @@ fn main() {
                         }
                     });
                     log_play("beep", &pattern, vol);
-                    tunes::play_beep(&player, vol, &pattern);
+                    tunes::play_beep(&player, vol, bpm, &pattern);
                 }
                 Command::Zelda { song } => {
                     let song =
                         song.unwrap_or_else(|| ZELDA_BY_HOUR[(current_hour() % 12) as usize]);
                     log_play("zelda", &song, vol);
-                    tunes::play_zelda(&player, vol, &song);
+                    tunes::play_zelda(&player, vol, bpm, &song);
                 }
                 Command::Clock { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("clock", &hour, vol);
-                    tunes::play_clock(&player, vol, hour);
+                    tunes::play_clock(&player, vol, bpm, hour);
                 }
                 Command::Chords { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("chords", &hour, vol);
-                    tunes::play_chords(&player, vol, hour);
+                    tunes::play_chords(&player, vol, bpm, hour);
                 }
                 Command::Scale { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("scale", &hour, vol);
-                    tunes::play_scale(&player, vol, hour);
+                    tunes::play_scale(&player, vol, bpm, hour);
                 }
                 Command::Jazz { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("jazz", &hour, vol);
-                    tunes::play_jazz(&player, vol, hour);
+                    tunes::play_jazz(&player, vol, bpm, hour);
                 }
                 Command::Run | Command::Install | Command::Uninstall | Command::Status => {
                     unreachable!()

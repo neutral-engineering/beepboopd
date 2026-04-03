@@ -16,14 +16,14 @@ const LICK: &[(i32, f32)] = &[
     (0, 2.0),  // D  — quarter
 ];
 
-pub fn play_jazz(player: &Player, vol: f32, hour: u32) {
+pub fn play_jazz(player: &Player, vol: f32, bpm: Option<f32>, hour: u32) {
     let root = hour_to_root(hour);
 
     let mut buf = Buf::new();
     for &(interval, beats) in LICK {
         buf.sine_lp(
             note_freq(root + interval),
-            beat(beats, DEFAULT_BPM),
+            beat(beats, bpm.unwrap_or(DEFAULT_BPM)),
             2500.0,
             vol,
         );

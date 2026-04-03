@@ -6,7 +6,7 @@ const DEFAULT_BPM: f32 = 150.0;
 
 /// Chord style: unique chord per hour.
 /// Hours 0-11 get major chords, 12-23 get minor chords.
-pub fn play_chords(player: &Player, vol: f32, hour: u32) {
+pub fn play_chords(player: &Player, vol: f32, bpm: Option<f32>, hour: u32) {
     let root = hour_to_root(hour);
     let third = if hour >= 12 { 3 } else { 4 };
     let f1 = note_freq(root);
@@ -14,7 +14,7 @@ pub fn play_chords(player: &Player, vol: f32, hour: u32) {
     let f3 = note_freq(root + 7);
     let amp = vol / 1.7;
 
-    let dur = beat(2.0, DEFAULT_BPM);
+    let dur = beat(2.0, bpm.unwrap_or(DEFAULT_BPM));
     let mut buf = Buf::new();
     let n = (SR * dur) as usize;
     let rc = 1.0 / (2.0 * PI * 3000.0);

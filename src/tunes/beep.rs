@@ -38,7 +38,8 @@ const FAILURE: &[(f32, f32)] = &[
     (440.0, 2.33),
 ];
 
-pub fn play_beep(player: &Player, vol: f32, pattern: &BeepPattern) {
+pub fn play_beep(player: &Player, vol: f32, bpm: Option<f32>, pattern: &BeepPattern) {
+    let bpm = bpm.unwrap_or(DEFAULT_BPM);
     let tones = match pattern {
         BeepPattern::Success => SUCCESS,
         BeepPattern::Failure => FAILURE,
@@ -46,7 +47,7 @@ pub fn play_beep(player: &Player, vol: f32, pattern: &BeepPattern) {
 
     let mut buf = Buf::new();
     for &(freq, beats) in tones {
-        buf.sine_lp(freq, beat(beats, DEFAULT_BPM), 2000.0, vol);
+        buf.sine_lp(freq, beat(beats, bpm), 2000.0, vol);
     }
     buf.play(player);
 }
