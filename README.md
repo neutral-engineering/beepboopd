@@ -25,6 +25,12 @@ cargo install beepboopd
 beepboopd install
 ```
 
+Or with a custom config baked in, like zelda all week, but clock on the weekend:
+
+```sh
+BEEPBOOPD_TUNE=zelda BEEPBOOPD_WEEK="s:clock;su:clock" beepboopd install
+```
+
 Or from source:
 
 ```sh

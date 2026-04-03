@@ -13,6 +13,10 @@ struct Cli {
     #[arg(short, long, env = "BEEPBOOPD_VOLUME", default_value_t = 0.9)]
     volume: f32,
 
+    /// BPM override (uses each tune's default if not set)
+    #[arg(short, long, env = "BEEPBOOPD_BPM")]
+    bpm: Option<f32>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -58,7 +62,7 @@ fn log_play(cmd: &str, tune: &dyn fmt::Display, volume: f32) {
 }
 
 /// Resolve the current tune and play it.
-fn play_now(vol: f32) {
+fn play_now(vol: f32, bpm: Option<f32>) {
     let tune = tune_for_today()
         .or_else(|| {
             std::env::var("BEEPBOOPD_TUNE")
@@ -79,43 +83,51 @@ fn play_now(vol: f32) {
                 BeepPattern::Failure
             };
             log_play("beep", &pattern, vol);
-            tunes::play_beep(&player, vol, &pattern);
+            tunes::play_beep(&player, vol, bpm, &pattern);
         }
         Tune::Zelda => {
             let song = ZELDA_BY_HOUR[(current_hour() % 12) as usize];
             log_play("zelda", &song, vol);
-            tunes::play_zelda(&player, vol, &song);
+            tunes::play_zelda(&player, vol, bpm, &song);
         }
         Tune::Clock => {
             let hour = current_hour();
             log_play("clock", &hour, vol);
-            tunes::play_clock(&player, vol, hour);
+            tunes::play_clock(&player, vol, bpm, hour);
         }
         Tune::Chords => {
             let hour = current_hour();
             log_play("chords", &hour, vol);
-            tunes::play_chords(&player, vol, hour);
+            tunes::play_chords(&player, vol, bpm, hour);
         }
         Tune::Scale => {
             let hour = current_hour();
             log_play("scale", &hour, vol);
-            tunes::play_scale(&player, vol, hour);
+            tunes::play_scale(&player, vol, bpm, hour);
         }
         Tune::Jazz => {
             let hour = current_hour();
             log_play("jazz", &hour, vol);
-            tunes::play_jazz(&player, vol, hour);
+            tunes::play_jazz(&player, vol, bpm, hour);
         }
     }
 
     player.sleep_until_end();
 }
 
-/// Seconds until the next hour boundary.
-fn secs_until_next_hour() -> u64 {
+const WAKE_INTERVAL_SECS: u64 = 300; // 5 minutes
+
+/// Seconds until the next chime boundary for a given period in minutes.
+fn secs_until_next_chime(period_min: u64) -> u64 {
     let tm = local_time();
-    let remaining = 3600 - (tm.tm_min as u64 * 60 + tm.tm_sec as u64);
-    if remaining == 0 { 3600 } else { remaining }
+    let elapsed = tm.tm_min as u64 * 60 + tm.tm_sec as u64;
+    let period_secs = period_min * 60;
+    let remaining = period_secs - (elapsed % period_secs);
+    if remaining == 0 {
+        period_secs
+    } else {
+        remaining
+    }
 }
 
 /// Get current local time.
@@ -161,81 +173,153 @@ fn tune_for_today() -> Option<Tune> {
     None
 }
 
-const SERVICE_TEMPLATE: &str = r#"[Unit]
-Description=beepboopd - Beep Boop Daemon
+const SYSTEMD_TEMPLATE: &str = include_str!("../beepboopd.service");
+const LAUNCHD_TEMPLATE: &str = include_str!("../engineering.neutral.beepboopd.plist");
 
-[Service]
-Type=simple
-Restart=on-failure
-Environment="BEEPBOOPD_TUNE=zelda"
-Environment="BEEPBOOPD_VOLUME=0.8"
-Environment="BEEPBOOPD_WEEK=s:chords;su:clock"
-#Environment="BEEPBOOPD_LOG=false"
-ExecStart=EXEC_PATH run
+fn home_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("HOME").expect("HOME not set"))
+}
 
-[Install]
-WantedBy=default.target
-"#;
+fn exe_path() -> String {
+    std::env::current_exe()
+        .expect("could not determine binary path")
+        .to_string_lossy()
+        .into_owned()
+}
 
-fn systemd_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").expect("HOME not set");
-    std::path::PathBuf::from(home).join(".config/systemd/user")
+const ENV_KEYS: &[&str] = &[
+    "BEEPBOOPD_TUNE",
+    "BEEPBOOPD_VOLUME",
+    "BEEPBOOPD_WEEK",
+    "BEEPBOOPD_BPM",
+    "BEEPBOOPD_PERIOD_MINUTES",
+    "BEEPBOOPD_LOG",
+];
+
+fn systemd_env_lines() -> String {
+    let mut lines = String::new();
+    for &key in ENV_KEYS {
+        if let Ok(val) = std::env::var(key) {
+            lines.push_str(&format!("Environment=\"{key}={val}\"\n"));
+        }
+    }
+    lines
+}
+
+fn launchd_env_dict() -> String {
+    let mut entries = String::new();
+    for &key in ENV_KEYS {
+        if let Ok(val) = std::env::var(key) {
+            entries.push_str(&format!(
+                "        <key>{key}</key>\n        <string>{val}</string>\n"
+            ));
+        }
+    }
+    if entries.is_empty() {
+        return String::new();
+    }
+    format!("    <key>EnvironmentVariables</key>\n    <dict>\n{entries}    </dict>\n")
 }
 
 fn install_service() {
-    let exe = std::env::current_exe().expect("could not determine binary path");
-    let service = SERVICE_TEMPLATE.replace("EXEC_PATH", &exe.to_string_lossy());
+    let exe = exe_path();
 
-    let dir = systemd_dir();
-    std::fs::create_dir_all(&dir).expect("could not create systemd user dir");
+    if cfg!(target_os = "macos") {
+        let dir = home_dir().join("Library/LaunchAgents");
+        std::fs::create_dir_all(&dir).expect("could not create LaunchAgents dir");
+        let path = dir.join("engineering.neutral.beepboopd.plist");
 
-    let path = dir.join("beepboopd.service");
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", &path.to_string_lossy()])
+            .output();
 
-    // Stop existing service if running
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "stop", "beepboopd.service"])
-        .output();
+        let plist = LAUNCHD_TEMPLATE.replace("EXEC_PATH", &exe).replace(
+            "</dict>\n</plist>",
+            &format!("{}</dict>\n</plist>", launchd_env_dict()),
+        );
+        std::fs::write(&path, plist).expect("could not write plist");
+        eprintln!("wrote {}", path.display());
 
-    std::fs::write(&path, service).expect("could not write service file");
-    eprintln!("wrote {}", path.display());
+        let _ = std::process::Command::new("launchctl")
+            .args(["load", &path.to_string_lossy()])
+            .status();
+    } else {
+        let dir = home_dir().join(".config/systemd/user");
+        std::fs::create_dir_all(&dir).expect("could not create systemd user dir");
+        let path = dir.join("beepboopd.service");
 
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status();
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "enable", "--now", "beepboopd.service"])
-        .status();
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "stop", "beepboopd.service"])
+            .output();
+
+        let service = SYSTEMD_TEMPLATE
+            .replace("EXEC_PATH", &exe)
+            .replace("ExecStart=", &format!("{}ExecStart=", systemd_env_lines()));
+        std::fs::write(&path, service).expect("could not write service file");
+        eprintln!("wrote {}", path.display());
+
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .status();
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "enable", "--now", "beepboopd.service"])
+            .status();
+    }
 
     eprintln!("beepboopd installed and started");
-    eprintln!("edit {} to configure", path.display());
 }
 
 fn uninstall_service() {
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "disable", "--now", "beepboopd.service"])
-        .status();
-
-    let path = systemd_dir().join("beepboopd.service");
-    if path.exists() {
-        std::fs::remove_file(&path).expect("could not remove service file");
-        eprintln!("removed {}", path.display());
+    if cfg!(target_os = "macos") {
+        let path = home_dir().join("Library/LaunchAgents/engineering.neutral.beepboopd.plist");
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", &path.to_string_lossy()])
+            .status();
+        if path.exists() {
+            std::fs::remove_file(&path).expect("could not remove plist");
+            eprintln!("removed {}", path.display());
+        }
+    } else {
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "disable", "--now", "beepboopd.service"])
+            .status();
+        let path = home_dir().join(".config/systemd/user/beepboopd.service");
+        if path.exists() {
+            std::fs::remove_file(&path).expect("could not remove service file");
+            eprintln!("removed {}", path.display());
+        }
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .status();
     }
-
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status();
-
     eprintln!("beepboopd uninstalled");
 }
 
 fn show_status() {
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "status", "beepboopd.service"])
-        .status();
-    eprintln!();
-    let _ = std::process::Command::new("journalctl")
-        .args(["--user", "-u", "beepboopd.service", "-n", "10", "--no-pager"])
-        .status();
+    if cfg!(target_os = "macos") {
+        let _ = std::process::Command::new("launchctl")
+            .args(["list", "engineering.neutral.beepboopd"])
+            .status();
+        eprintln!("\nlogs: /tmp/beepboopd.log");
+        let _ = std::process::Command::new("tail")
+            .args(["-n", "10", "/tmp/beepboopd.log"])
+            .status();
+    } else {
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "status", "beepboopd.service"])
+            .status();
+        eprintln!();
+        let _ = std::process::Command::new("journalctl")
+            .args([
+                "--user",
+                "-u",
+                "beepboopd.service",
+                "-n",
+                "10",
+                "--no-pager",
+            ])
+            .status();
+    }
 }
 
 fn main() {
@@ -270,26 +354,41 @@ fn main() {
         }
     };
     let vol = cli.volume;
+    let bpm = cli.bpm;
 
     match cli.command.unwrap_or(Command::Beep { pattern: None }) {
         Command::Install => install_service(),
         Command::Uninstall => uninstall_service(),
         Command::Status => show_status(),
         Command::Run => {
+            let period_min: u64 = std::env::var("BEEPBOOPD_PERIOD_MINUTES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(60);
             let tune_env = std::env::var("BEEPBOOPD_TUNE").ok();
             let week_env = std::env::var("BEEPBOOPD_WEEK").ok();
             info!(
                 volume = vol,
                 tune = tune_env.as_deref().unwrap_or("beep"),
                 week = week_env.as_deref().unwrap_or(""),
+                period_min = period_min,
                 "started"
             );
 
+            let mut last_chime = std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(period_min * 60))
+                .unwrap_or_else(std::time::Instant::now);
             loop {
-                let wait = secs_until_next_hour();
-                info!(next_chime_secs = wait, "sleeping");
-                std::thread::sleep(std::time::Duration::from_secs(wait));
-                play_now(vol);
+                let until_chime = secs_until_next_chime(period_min);
+                let sleep = until_chime.min(WAKE_INTERVAL_SECS);
+                std::thread::sleep(std::time::Duration::from_secs(sleep));
+
+                if secs_until_next_chime(period_min) <= 1
+                    && last_chime.elapsed().as_secs() > period_min * 30
+                {
+                    play_now(vol, bpm);
+                    last_chime = std::time::Instant::now();
+                }
             }
         }
         cmd => {
@@ -329,33 +428,33 @@ fn main() {
                         }
                     });
                     log_play("beep", &pattern, vol);
-                    tunes::play_beep(&player, vol, &pattern);
+                    tunes::play_beep(&player, vol, bpm, &pattern);
                 }
                 Command::Zelda { song } => {
                     let song =
                         song.unwrap_or_else(|| ZELDA_BY_HOUR[(current_hour() % 12) as usize]);
                     log_play("zelda", &song, vol);
-                    tunes::play_zelda(&player, vol, &song);
+                    tunes::play_zelda(&player, vol, bpm, &song);
                 }
                 Command::Clock { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("clock", &hour, vol);
-                    tunes::play_clock(&player, vol, hour);
+                    tunes::play_clock(&player, vol, bpm, hour);
                 }
                 Command::Chords { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("chords", &hour, vol);
-                    tunes::play_chords(&player, vol, hour);
+                    tunes::play_chords(&player, vol, bpm, hour);
                 }
                 Command::Scale { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("scale", &hour, vol);
-                    tunes::play_scale(&player, vol, hour);
+                    tunes::play_scale(&player, vol, bpm, hour);
                 }
                 Command::Jazz { hour } => {
                     let hour = hour.unwrap_or_else(current_hour);
                     log_play("jazz", &hour, vol);
-                    tunes::play_jazz(&player, vol, hour);
+                    tunes::play_jazz(&player, vol, bpm, hour);
                 }
                 Command::Run | Command::Install | Command::Uninstall | Command::Status => {
                     unreachable!()
@@ -364,5 +463,70 @@ fn main() {
 
             player.sleep_until_end();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn systemd_template_has_exec_placeholder() {
+        assert!(SYSTEMD_TEMPLATE.contains("EXEC_PATH"));
+    }
+
+    #[test]
+    fn systemd_template_substitution() {
+        let result = SYSTEMD_TEMPLATE.replace("EXEC_PATH", "/usr/local/bin/beepboopd");
+        assert!(result.contains("ExecStart=/usr/local/bin/beepboopd run"));
+        assert!(!result.contains("EXEC_PATH"));
+    }
+
+    #[test]
+    fn launchd_template_has_exec_placeholder() {
+        assert!(LAUNCHD_TEMPLATE.contains("EXEC_PATH"));
+    }
+
+    #[test]
+    fn launchd_template_is_valid_xml() {
+        let result = LAUNCHD_TEMPLATE.replace("EXEC_PATH", "/usr/local/bin/beepboopd");
+        assert!(!result.contains("EXEC_PATH"));
+        assert!(result.contains("engineering.neutral.beepboopd"));
+        assert!(result.starts_with("<?xml"));
+        // Verify balanced tags
+        assert_eq!(
+            result.matches("<dict>").count(),
+            result.matches("</dict>").count()
+        );
+        assert_eq!(
+            result.matches("<array>").count(),
+            result.matches("</array>").count()
+        );
+        assert!(result.contains("</plist>"));
+    }
+
+    #[test]
+    fn launchd_template_with_env_injection() {
+        let result = LAUNCHD_TEMPLATE
+            .replace("EXEC_PATH", "/usr/local/bin/beepboopd")
+            .replace(
+                "</dict>\n</plist>",
+                "    <key>EnvironmentVariables</key>\n    <dict>\n        <key>BEEPBOOPD_TUNE</key>\n        <string>zelda</string>\n    </dict>\n</dict>\n</plist>",
+            );
+        assert!(result.contains("BEEPBOOPD_TUNE"));
+        assert!(result.contains("zelda"));
+        assert_eq!(
+            result.matches("<dict>").count(),
+            result.matches("</dict>").count()
+        );
+    }
+
+    #[test]
+    fn systemd_env_lines_from_env() {
+        // SAFETY: test runs single-threaded, no concurrent env access
+        unsafe { std::env::set_var("BEEPBOOPD_TUNE", "zelda") };
+        let lines = systemd_env_lines();
+        assert!(lines.contains("BEEPBOOPD_TUNE=zelda"));
+        unsafe { std::env::remove_var("BEEPBOOPD_TUNE") };
     }
 }

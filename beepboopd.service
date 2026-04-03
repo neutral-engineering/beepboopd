@@ -4,11 +4,13 @@ Description=beepboopd - Beep Boop Daemon
 [Service]
 Type=simple
 Restart=on-failure
-Environment="BEEPBOOPD_TUNE=zelda"
-Environment="BEEPBOOPD_VOLUME=0.8"
-Environment="BEEPBOOPD_WEEK=s:chords;su:clock"
+#Environment="BEEPBOOPD_TUNE=chords"
+#Environment="BEEPBOOPD_VOLUME=0.9"
+#Environment="BEEPBOOPD_WEEK=m:zelda;t:chords;w:clock;th:beep;f:zelda;s:scale;su:clock"
+#Environment="BEEPBOOPD_BPM=110"
+#Environment="BEEPBOOPD_PERIOD_MINUTES=60"
 #Environment="BEEPBOOPD_LOG=false"
-ExecStart=%h/.local/bin/beepboopd run
+ExecStart=EXEC_PATH run
 
 [Install]
 WantedBy=default.target
