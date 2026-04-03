@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rodio::{DeviceSinkBuilder, Player};
 use std::fmt;
 use tracing::info;
-use tunes::{BeepPattern, CLASSICAL_BY_HOUR, ClassicalPiece, Tune, ZELDA_BY_HOUR, ZeldaSong};
+use tunes::{Anthem, BeepPattern, CLASSICAL_BY_HOUR, COUNTRIES_BY_HOUR, ClassicalPiece, Tune, ZELDA_BY_HOUR, ZeldaSong};
 
 #[derive(Parser)]
 #[command(name = "beepboopd", about = "the beep boop daemon", version)]
@@ -49,6 +49,8 @@ enum Command {
     },
     /// Classical pieces: shrimp, satie, fur-elise, swan-lake (picks by hour if no piece given)
     Classical { piece: Option<ClassicalPiece> },
+    /// National anthems (picks by hour if no anthem given)
+    Countries { anthem: Option<Anthem> },
     /// Run as a daemon: chime every hour
     Run,
     /// Install systemd user service
@@ -117,6 +119,12 @@ fn play_now(vol: f32, bpm: Option<f32>) {
             let piece = CLASSICAL_BY_HOUR[(hour as usize) % CLASSICAL_BY_HOUR.len()];
             log_play("classical", &piece, vol);
             tunes::play_classical(&player, vol, bpm, hour, &piece);
+        }
+        Tune::Countries => {
+            let hour = current_hour();
+            let anthem = COUNTRIES_BY_HOUR[(hour as usize) % COUNTRIES_BY_HOUR.len()];
+            log_play("countries", &anthem, vol);
+            tunes::play_countries(&player, vol, bpm, &anthem);
         }
     }
 
@@ -423,6 +431,7 @@ fn main() {
                     Tune::Zelda => Command::Zelda { song: None },
                     Tune::Jazz => Command::Jazz { hour: None },
                     Tune::Classical => Command::Classical { piece: None },
+                    Tune::Countries => Command::Countries { anthem: None },
                 },
                 other => other,
             };
@@ -470,6 +479,12 @@ fn main() {
                     let piece = piece.unwrap_or(CLASSICAL_BY_HOUR[(hour as usize) % CLASSICAL_BY_HOUR.len()]);
                     log_play("classical", &piece, vol);
                     tunes::play_classical(&player, vol, bpm, hour, &piece);
+                }
+                Command::Countries { anthem } => {
+                    let hour = current_hour();
+                    let anthem = anthem.unwrap_or(COUNTRIES_BY_HOUR[(hour as usize) % COUNTRIES_BY_HOUR.len()]);
+                    log_play("countries", &anthem, vol);
+                    tunes::play_countries(&player, vol, bpm, &anthem);
                 }
                 Command::Run | Command::Install | Command::Uninstall | Command::Status => {
                     unreachable!()

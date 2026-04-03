@@ -4,7 +4,7 @@ INSTALL_DIR = $(HOME)/.local/bin
 SYSTEMD_DIR = $(HOME)/.config/systemd/user
 
 .PHONY: help build release install installcheck uninstall all check \
-	beep clock chords scale zelda jazz classical
+	beep clock chords scale zelda jazz classical countries
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -62,3 +62,6 @@ jazz: build ## Play the lick at current hour
 
 classical: build ## Play classical piece (rotates by hour)
 	$(BINARY) classical
+
+countries: build ## Play national anthem (rotates by hour)
+	$(BINARY) countries
