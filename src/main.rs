@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rodio::{DeviceSinkBuilder, Player};
 use std::fmt;
 use tracing::info;
-use tunes::{Anthem, BeepPattern, CLASSICAL_BY_HOUR, COUNTRIES_BY_HOUR, ClassicalPiece, Tune, ZELDA_BY_HOUR, ZeldaSong};
+use tunes::{Anthem, BeepPattern, CLASSICAL_BY_HOUR, COUNTRIES_BY_HOUR, ClassicalPiece, JAZZ_BY_HOUR, JazzTune, Tune, ZELDA_BY_HOUR, ZeldaSong};
 
 #[derive(Parser)]
 #[command(name = "beepboopd", about = "the beep boop daemon", version)]
@@ -42,11 +42,8 @@ enum Command {
     },
     /// Ocarina of Time songs (picks by hour if no song given)
     Zelda { song: Option<ZeldaSong> },
-    /// The Lick — jazz's most famous phrase in all 12 keys
-    Jazz {
-        #[arg(value_parser = clap::value_parser!(u32).range(0..24))]
-        hour: Option<u32>,
-    },
+    /// Jazz standards: lick, so-what, blue-monk, take-five, giant-steps, moanin (picks by hour)
+    Jazz { tune: Option<JazzTune> },
     /// Classical pieces: shrimp, satie, fur-elise, swan-lake (picks by hour if no piece given)
     Classical { piece: Option<ClassicalPiece> },
     /// National anthems (picks by hour if no anthem given)
@@ -111,8 +108,9 @@ fn play_now(vol: f32, bpm: Option<f32>) {
         }
         Tune::Jazz => {
             let hour = current_hour();
-            log_play("jazz", &hour, vol);
-            tunes::play_jazz(&player, vol, bpm, hour);
+            let tune = JAZZ_BY_HOUR[(hour as usize) % JAZZ_BY_HOUR.len()];
+            log_play("jazz", &tune, vol);
+            tunes::play_jazz(&player, vol, bpm, hour, &tune);
         }
         Tune::Classical => {
             let hour = current_hour();
@@ -429,7 +427,7 @@ fn main() {
                     Tune::Chords => Command::Chords { hour: None },
                     Tune::Scale => Command::Scale { hour: None },
                     Tune::Zelda => Command::Zelda { song: None },
-                    Tune::Jazz => Command::Jazz { hour: None },
+                    Tune::Jazz => Command::Jazz { tune: None },
                     Tune::Classical => Command::Classical { piece: None },
                     Tune::Countries => Command::Countries { anthem: None },
                 },
@@ -469,10 +467,11 @@ fn main() {
                     log_play("scale", &hour, vol);
                     tunes::play_scale(&player, vol, bpm, hour);
                 }
-                Command::Jazz { hour } => {
-                    let hour = hour.unwrap_or_else(current_hour);
-                    log_play("jazz", &hour, vol);
-                    tunes::play_jazz(&player, vol, bpm, hour);
+                Command::Jazz { tune } => {
+                    let hour = current_hour();
+                    let tune = tune.unwrap_or(JAZZ_BY_HOUR[(hour as usize) % JAZZ_BY_HOUR.len()]);
+                    log_play("jazz", &tune, vol);
+                    tunes::play_jazz(&player, vol, bpm, hour, &tune);
                 }
                 Command::Classical { piece } => {
                     let hour = current_hour();
