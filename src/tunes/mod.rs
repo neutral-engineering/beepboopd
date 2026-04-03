@@ -1,6 +1,8 @@
 mod beep;
 mod chords;
+mod classical;
 mod clock;
+mod countries;
 mod jazz;
 mod scale;
 mod wee_woo;
@@ -8,8 +10,10 @@ mod zelda;
 
 pub use beep::{BeepPattern, play_beep};
 pub use chords::play_chords;
+pub use classical::{CLASSICAL_BY_HOUR, ClassicalPiece, play_classical};
 pub use clock::play_clock;
-pub use jazz::play_jazz;
+pub use countries::{Anthem, COUNTRIES_BY_HOUR, play_countries};
+pub use jazz::{JAZZ_BY_HOUR, JazzTune, play_jazz};
 pub use scale::play_scale;
 pub use wee_woo::play_wee_woo;
 pub use zelda::{ZELDA_BY_HOUR, ZeldaSong, play_zelda};
@@ -31,6 +35,8 @@ pub enum Tune {
     Scale,
     Zelda,
     Jazz,
+    Classical,
+    Countries,
 }
 
 /// Convert beats at a given BPM to seconds.
