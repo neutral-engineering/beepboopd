@@ -138,6 +138,44 @@ fn local_time() -> libc::tm {
     }
 }
 
+/// Current Unix epoch time in seconds.
+fn epoch_secs() -> i64 {
+    unsafe { libc::time(std::ptr::null_mut()) }
+}
+
+/// Sleep until an absolute wall-clock time (Unix epoch seconds).
+///
+/// On Linux, uses `clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME)` which
+/// returns immediately after system suspend if the target time has passed.
+/// On other platforms, polls with short relative sleeps.
+fn sleep_until_epoch(target: i64) {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let ts = libc::timespec {
+            tv_sec: target as libc::time_t,
+            tv_nsec: 0,
+        };
+        libc::clock_nanosleep(
+            libc::CLOCK_REALTIME,
+            libc::TIMER_ABSTIME,
+            &ts,
+            std::ptr::null_mut(),
+        );
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        loop {
+            let now = epoch_secs();
+            if now >= target {
+                break;
+            }
+            let delta = (target - now).min(10) as u64;
+            std::thread::sleep(std::time::Duration::from_secs(delta));
+        }
+    }
+}
+
 fn current_hour() -> u32 {
     local_time().tm_hour as u32
 }
@@ -379,22 +417,19 @@ fn main() {
                 .unwrap_or_else(std::time::Instant::now);
             loop {
                 let until_chime = secs_until_next_chime(period_min);
+                let target = epoch_secs() + until_chime as i64;
+                sleep_until_epoch(target);
 
-                // Poll every 10s once we're within 60s of the boundary;
-                // sleep longer when far away. After laptop sleep, the next
-                // wake re-checks wall-clock time immediately.
-                let sleep_secs = if until_chime <= 60 { 10 } else { until_chime - 50 };
-                std::thread::sleep(std::time::Duration::from_secs(sleep_secs));
-
-                let remaining = secs_until_next_chime(period_min);
                 let since_last = last_chime.elapsed().as_secs();
+                let remaining = secs_until_next_chime(period_min);
 
-                // Fire if we're within 5s of the boundary (handles normal
-                // wake and post-sleep overshoots) and haven't already fired
-                // for this period.
-                if (remaining <= 5 || remaining >= period_secs - 5)
-                    && since_last > period_secs / 2
-                {
+                // Normal: we woke right at the boundary.
+                // Sleep/wake: we overslept past it — enough real time
+                // has elapsed that we know we missed a boundary.
+                let at_boundary = remaining <= 5 || remaining >= period_secs - 5;
+                let missed = since_last >= period_secs - 5;
+
+                if (at_boundary || missed) && since_last > period_secs / 2 {
                     play_now(vol, bpm);
                     last_chime = std::time::Instant::now();
                 }
