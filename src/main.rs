@@ -423,13 +423,11 @@ fn main() {
                 let since_last = last_chime.elapsed().as_secs();
                 let remaining = secs_until_next_chime(period_min);
 
-                // Normal: we woke right at the boundary.
-                // Sleep/wake: we overslept past it — enough real time
-                // has elapsed that we know we missed a boundary.
+                // Fire only if we're within 5s of the boundary (either
+                // side). If we overslept past that window, skip it.
                 let at_boundary = remaining <= 5 || remaining >= period_secs - 5;
-                let missed = since_last >= period_secs - 5;
 
-                if (at_boundary || missed) && since_last > period_secs / 2 {
+                if at_boundary && since_last > period_secs / 2 {
                     play_now(vol, bpm);
                     last_chime = std::time::Instant::now();
                 }
