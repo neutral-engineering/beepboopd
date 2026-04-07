@@ -115,8 +115,6 @@ fn play_now(vol: f32, bpm: Option<f32>) {
     player.sleep_until_end();
 }
 
-const WAKE_INTERVAL_SECS: u64 = 300; // 5 minutes
-
 /// Seconds until the next chime boundary for a given period in minutes.
 fn secs_until_next_chime(period_min: u64) -> u64 {
     let tm = local_time();
@@ -375,16 +373,27 @@ fn main() {
                 "started"
             );
 
+            let period_secs = period_min * 60;
             let mut last_chime = std::time::Instant::now()
-                .checked_sub(std::time::Duration::from_secs(period_min * 60))
+                .checked_sub(std::time::Duration::from_secs(period_secs))
                 .unwrap_or_else(std::time::Instant::now);
             loop {
                 let until_chime = secs_until_next_chime(period_min);
-                let sleep = until_chime.min(WAKE_INTERVAL_SECS);
-                std::thread::sleep(std::time::Duration::from_secs(sleep));
 
-                if secs_until_next_chime(period_min) <= 1
-                    && last_chime.elapsed().as_secs() > period_min * 30
+                // Poll every 10s once we're within 60s of the boundary;
+                // sleep longer when far away. After laptop sleep, the next
+                // wake re-checks wall-clock time immediately.
+                let sleep_secs = if until_chime <= 60 { 10 } else { until_chime - 50 };
+                std::thread::sleep(std::time::Duration::from_secs(sleep_secs));
+
+                let remaining = secs_until_next_chime(period_min);
+                let since_last = last_chime.elapsed().as_secs();
+
+                // Fire if we're within 5s of the boundary (handles normal
+                // wake and post-sleep overshoots) and haven't already fired
+                // for this period.
+                if (remaining <= 5 || remaining >= period_secs - 5)
+                    && since_last > period_secs / 2
                 {
                     play_now(vol, bpm);
                     last_chime = std::time::Instant::now();
