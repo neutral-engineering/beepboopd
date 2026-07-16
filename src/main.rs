@@ -155,12 +155,14 @@ fn sleep_until_epoch(target: i64) {
             tv_sec: target as libc::time_t,
             tv_nsec: 0,
         };
-        libc::clock_nanosleep(
+        // Retry on EINTR: a handled signal must not cut the sleep short.
+        while libc::clock_nanosleep(
             libc::CLOCK_REALTIME,
             libc::TIMER_ABSTIME,
             &ts,
             std::ptr::null_mut(),
-        );
+        ) == libc::EINTR
+        {}
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -400,7 +402,8 @@ fn main() {
             let period_min: u64 = std::env::var("BEEPBOOPD_PERIOD_MINUTES")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(60);
+                .unwrap_or(60)
+                .max(1);
             let tune_env = std::env::var("BEEPBOOPD_TUNE").ok();
             let week_env = std::env::var("BEEPBOOPD_WEEK").ok();
             info!(
@@ -412,24 +415,28 @@ fn main() {
             );
 
             let period_secs = period_min * 60;
-            let mut last_chime = std::time::Instant::now()
-                .checked_sub(std::time::Duration::from_secs(period_secs))
-                .unwrap_or_else(std::time::Instant::now);
+            // Wall-clock, not Instant: monotonic clocks freeze during
+            // suspend, which would suppress the first chime after resume.
+            let mut last_chime_epoch = epoch_secs() - period_secs as i64;
             loop {
                 let until_chime = secs_until_next_chime(period_min);
                 let target = epoch_secs() + until_chime as i64;
                 sleep_until_epoch(target);
 
-                let since_last = last_chime.elapsed().as_secs();
+                let since_last = epoch_secs() - last_chime_epoch;
                 let remaining = secs_until_next_chime(period_min);
 
                 // Fire only if we're within 5s of the boundary (either
                 // side). If we overslept past that window, skip it.
                 let at_boundary = remaining <= 5 || remaining >= period_secs - 5;
 
-                if at_boundary && since_last > period_secs / 2 {
+                // Negative since_last means the wall clock was stepped
+                // backward; resync rather than suppress until it catches up.
+                if at_boundary && (since_last < 0 || since_last > (period_secs / 2) as i64) {
                     play_now(vol, bpm);
-                    last_chime = std::time::Instant::now();
+                    last_chime_epoch = epoch_secs();
+                } else {
+                    info!(remaining, since_last, "skipping boundary");
                 }
             }
         }
