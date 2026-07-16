@@ -115,8 +115,6 @@ fn play_now(vol: f32, bpm: Option<f32>) {
     player.sleep_until_end();
 }
 
-const WAKE_INTERVAL_SECS: u64 = 300; // 5 minutes
-
 /// Seconds until the next chime boundary for a given period in minutes.
 fn secs_until_next_chime(period_min: u64) -> u64 {
     let tm = local_time();
@@ -137,6 +135,46 @@ fn local_time() -> libc::tm {
         let mut tm = std::mem::zeroed::<libc::tm>();
         libc::localtime_r(&t, &mut tm);
         tm
+    }
+}
+
+/// Current Unix epoch time in seconds.
+fn epoch_secs() -> i64 {
+    unsafe { libc::time(std::ptr::null_mut()) }
+}
+
+/// Sleep until an absolute wall-clock time (Unix epoch seconds).
+///
+/// On Linux, uses `clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME)` which
+/// returns immediately after system suspend if the target time has passed.
+/// On other platforms, polls with short relative sleeps.
+fn sleep_until_epoch(target: i64) {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let ts = libc::timespec {
+            tv_sec: target as libc::time_t,
+            tv_nsec: 0,
+        };
+        // Retry on EINTR: a handled signal must not cut the sleep short.
+        while libc::clock_nanosleep(
+            libc::CLOCK_REALTIME,
+            libc::TIMER_ABSTIME,
+            &ts,
+            std::ptr::null_mut(),
+        ) == libc::EINTR
+        {}
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        loop {
+            let now = epoch_secs();
+            if now >= target {
+                break;
+            }
+            let delta = (target - now).min(10) as u64;
+            std::thread::sleep(std::time::Duration::from_secs(delta));
+        }
     }
 }
 
@@ -364,7 +402,8 @@ fn main() {
             let period_min: u64 = std::env::var("BEEPBOOPD_PERIOD_MINUTES")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(60);
+                .unwrap_or(60)
+                .max(1);
             let tune_env = std::env::var("BEEPBOOPD_TUNE").ok();
             let week_env = std::env::var("BEEPBOOPD_WEEK").ok();
             info!(
@@ -375,19 +414,29 @@ fn main() {
                 "started"
             );
 
-            let mut last_chime = std::time::Instant::now()
-                .checked_sub(std::time::Duration::from_secs(period_min * 60))
-                .unwrap_or_else(std::time::Instant::now);
+            let period_secs = period_min * 60;
+            // Wall-clock, not Instant: monotonic clocks freeze during
+            // suspend, which would suppress the first chime after resume.
+            let mut last_chime_epoch = epoch_secs() - period_secs as i64;
             loop {
                 let until_chime = secs_until_next_chime(period_min);
-                let sleep = until_chime.min(WAKE_INTERVAL_SECS);
-                std::thread::sleep(std::time::Duration::from_secs(sleep));
+                let target = epoch_secs() + until_chime as i64;
+                sleep_until_epoch(target);
 
-                if secs_until_next_chime(period_min) <= 1
-                    && last_chime.elapsed().as_secs() > period_min * 30
-                {
+                let since_last = epoch_secs() - last_chime_epoch;
+                let remaining = secs_until_next_chime(period_min);
+
+                // Fire only if we're within 5s of the boundary (either
+                // side). If we overslept past that window, skip it.
+                let at_boundary = remaining <= 5 || remaining >= period_secs - 5;
+
+                // Negative since_last means the wall clock was stepped
+                // backward; resync rather than suppress until it catches up.
+                if at_boundary && (since_last < 0 || since_last > (period_secs / 2) as i64) {
                     play_now(vol, bpm);
-                    last_chime = std::time::Instant::now();
+                    last_chime_epoch = epoch_secs();
+                } else {
+                    info!(remaining, since_last, "skipping boundary");
                 }
             }
         }
